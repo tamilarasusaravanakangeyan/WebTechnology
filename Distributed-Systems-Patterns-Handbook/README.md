@@ -28,6 +28,7 @@ Distributed-Systems-Patterns-Handbook/
 ├── 02-data-consistency/
 │   ├── 01-transactional-outbox.md             atomic "save + publish"
 │   ├── 02-saga-pattern.md                     orchestration, choreography, compensation
+│   ├── 02a-saga-durable-execution-notes.md    state machine, outbox relay, durable inbox, parking
 │   ├── 03-try-confirm-cancel.md               reserve → confirm / cancel
 │   ├── 04-database-per-service.md             data ownership and its consequences
 │   └── 05-event-sourcing-cqrs-materialized-views.md

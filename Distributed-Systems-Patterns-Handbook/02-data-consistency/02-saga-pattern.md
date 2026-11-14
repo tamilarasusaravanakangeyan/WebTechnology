@@ -7,6 +7,37 @@
 
 ---
 
+## Quick Summary — Best Practices at a Glance
+
+> Deep dive on durable execution: [2.2a Durable Execution Notes](02a-saga-durable-execution-notes.md).
+
+| Topic | Best practice | Why |
+|---|---|---|
+| **Orchestrated saga** | Use for 4+ steps, branching, timeouts, human approval; keep one explicit state machine | One place to answer "where is order 42?" |
+| **Choreographed saga** | Use only for 2–3 simple linear steps; avoid cyclic event dependencies | Flow is spread across services; hard to change |
+| **State machine** | Model states and transitions explicitly (`RUNNING`, `COMPENSATING`, `COMPLETED`, `FAILED`, `NEEDS_ATTENTION`); only legal transitions allowed | Rules are testable; illegal moves impossible |
+| **Persisted state** | Store current state in a DB row; write *before and after* each step | Orchestrator can resume after a crash |
+| **Transactional outbox** | Save saga state + outgoing message in **one** DB transaction; a relay publishes later | Prevents "state saved, message lost" |
+| **Outbox relay** | Poll 100–500 ms (or CDC/Debezium); persist trace context in the outbox row | Bounded delay; unbroken traces |
+| **Durable inbox** | Save incoming message to DB, *then* commit the Kafka offset; unique `message_id` | No loss, dedup, one bad saga can't block others |
+| **Ordering** | Sequence per saga; parallel across sagas | Correct per order, high throughput |
+| **Poison messages** | Malformed → DLQ; valid-but-failing → `PARKED` in inbox, saga `BLOCKED` | Isolate failure, keep context for replay |
+| **Idempotency** | Key every action/compensation by `sagaId:step`; compensation tolerates "nothing to undo" | Retries and duplicates are safe |
+| **Timeouts** | Treat as *unknown*, not failed — retry same key, then compensate | Avoids double-charge / missed refund |
+| **Compensation** | Reverse order, retry until success, escalate after budget | Compensations can fail too |
+| **Step ordering** | Likely-to-fail + cheap-to-undo first; pivot; irreversible last | Fewer, cheaper compensations |
+| **Optimistic concurrency** | Version column / `UPDATE ... WHERE version = ?` for saga rows and shared records | Detect lost updates without holding locks |
+| **Pessimistic control** | Semantic lock (`PENDING` flag) or reservation (TCC) for contended/high-value resources; use `SELECT ... FOR UPDATE SKIP LOCKED` to claim inbox rows | Prevents dirty reads / double processing when conflicts are likely |
+| **Isolation gap** | Saga has no "I": add semantic locks, commutative updates, re-read before pivot | Half-done state is visible to others |
+| **Recovery** | Scanner on `(status, updated_at)`, per-saga deadline, human queue | Stuck sagas never go unnoticed |
+| **Observability** | `sagaId` as correlation ID everywhere; alert on oldest in-flight age and `NEEDS_ATTENTION > 0` | Operability |
+| **Security** | Authorize compensations like actions; don't trust amounts in requests; encrypt saga data | Refund endpoint ≠ money printer |
+| **API UX** | Return `202 Accepted` + `PENDING`; don't hold HTTP open | Latency and resilience |
+
+**Optimistic vs. pessimistic — rule of thumb:** default to *optimistic* (cheap, no locks, retry on version conflict); switch to *pessimistic* (semantic lock / reservation / row lock) when conflicts are frequent or the cost of a conflict is high (money, scarce stock).
+
+---
+
 ## 1. Problem
 
 Placing an order touches Inventory, Payment and Shipping — three services, three databases.
